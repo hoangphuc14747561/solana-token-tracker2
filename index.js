@@ -4,7 +4,7 @@ const https = require("https");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
-const WORKER_ID = process.env.WORKER || "webcon_001";
+const WORKER_ID = process.env.WORKER || "webcon_002";
 
 const agent = new https.Agent({ rejectUnauthorized: false });
 
