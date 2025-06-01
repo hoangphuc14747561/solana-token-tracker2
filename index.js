@@ -59,7 +59,6 @@ async function getTokenPrice(mint, rayPairs) {
 
 async function scanRound(round) {
   try {
-    // ? Nhận việc từ PHP
     const workRes = await fetch(`${SERVER_URL}/assign-token.php?worker=${WORKER_ID}`, { agent });
     const data = await workRes.json();
 
@@ -75,14 +74,20 @@ async function scanRound(round) {
     if (price) {
       console.log(`✅ [${data.mint}] Giá: ${price.value} (${price.source})`);
 
+      const payload = {
+        mint: data.mint,
+        currentPrice: price.value,
+        scanTime: scanTime
+      };
+
+      if (data.index !== undefined) {
+        payload.index = data.index; // 👈 gửi kèm index nếu có
+      }
+
       await fetch(`${SERVER_URL}/update-token.php`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          mint: data.mint,
-          currentPrice: price.value,
-          scanTime: scanTime
-        }),
+        body: JSON.stringify(payload),
         agent
       });
     } else {
