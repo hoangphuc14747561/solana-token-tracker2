@@ -5,6 +5,7 @@ const https = require("https");
 const app = express();
 const PORT = process.env.PORT || 3000;
 const WORKER_ID = process.env.WORKER || "webcon_002";
+const SERVER_URL = "https://dienlanhquangphat.vn/toolvip";
 
 const agent = new https.Agent({ rejectUnauthorized: false });
 
@@ -58,28 +59,36 @@ async function getTokenPrice(mint, rayPairs) {
 
 async function scanRound(round) {
   try {
-    const workRes = await fetch(`https://test.pumpvote.com/api/work?worker=${WORKER_ID}`, { agent });
-    if (workRes.status === 204) return;
-    const token = await workRes.json();
+    // ? Nhận việc từ PHP
+    const workRes = await fetch(`${SERVER_URL}/assign-token.php?worker=${WORKER_ID}`, { agent });
+    const data = await workRes.json();
+
+    if (!data || !data.mint) {
+      console.log("⏳ Không có token nào pending...");
+      return;
+    }
 
     const rayPairs = await getRaydiumPairs();
     const scanTime = getLocalTime();
 
-    const price = await getTokenPrice(token.mint, rayPairs);
+    const price = await getTokenPrice(data.mint, rayPairs);
     if (price) {
-      const now = new Date();
-      await fetch("https://test.pumpvote.com/api/work", {
+      console.log(`✅ [${data.mint}] Giá: ${price.value} (${price.source})`);
+
+      await fetch(`${SERVER_URL}/update-token.php`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          mint: token.mint,
+          mint: data.mint,
           currentPrice: price.value,
-          scanTime,
-          worker: WORKER_ID
+          scanTime: scanTime
         }),
         agent
       });
+    } else {
+      console.log(`❌ Không lấy được giá cho ${data.mint}`);
     }
+
     await delay(DELAY_MS);
   } catch (err) {
     console.error("❌ Scan error:", err.message);
@@ -96,7 +105,7 @@ app.listen(PORT, () => {
   let round = 1;
   (async function loop() {
     while (true) {
-      console.log(`🔁 Worker ${WORKER_ID} - Round ${round++}`);
+      console.log(`🔁 Round ${round++}`);
       await scanRound(round);
       await delay(ROUND_DELAY_MS);
     }
