@@ -5,7 +5,7 @@ const fs = require("fs");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
-const WORKER_ID = process.env.WORKER || "node_helius";
+const WORKER_ID = process.env.WORKER || "node_helius1";
 const SERVER_URL = "https://dienlanhquangphat.vn/toolvip";
 const agent = new https.Agent({ rejectUnauthorized: false });
 
