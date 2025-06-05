@@ -4,15 +4,16 @@ const https = require("https");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
-const WORKER_ID = process.env.WORKER || "webcon_002";
+const WORKER_ID = process.env.WORKER || "node_003";
 const SERVER_URL = "https://dienlanhquangphat.vn/toolvip";
 
 const agent = new https.Agent({ rejectUnauthorized: false });
 
 const WSOL = "So11111111111111111111111111111111111111112";
+const AMOUNT = 100_000_000;
 const DELAY_MS = 2400;
 const ROUND_DELAY_MS = 500;
-const AMOUNT = 100_000_000;
+const BATCH_SIZE = 5;
 
 function delay(ms) {
   return new Promise(res => setTimeout(res, ms));
@@ -57,47 +58,74 @@ async function getTokenPrice(mint, rayPairs) {
   return jupiter || raydium || null;
 }
 
+async function getTokenPriceWithTimeout(mint, rayPairs, timeout = 5000) {
+  return Promise.race([
+    getTokenPrice(mint, rayPairs),
+    new Promise(resolve => setTimeout(() => resolve(null), timeout))
+  ]);
+}
+
+async function assignBatchTokens(batchSize) {
+  try {
+    const res = await fetch(`${SERVER_URL}/assign-token.php?worker=${WORKER_ID}&count=${batchSize}`, { agent });
+    const data = await res.json();
+    if (Array.isArray(data)) return data;
+    if (data && data.mint) return [data];
+    return [];
+  } catch {
+    return [];
+  }
+}
+
+async function sendResults(results) {
+  if (results.length === 0) return;
+  try {
+    await fetch(`${SERVER_URL}/update-token.php`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(results),
+      agent
+    });
+  } catch {}
+}
+
 async function scanRound(round) {
   try {
-    const workRes = await fetch(`${SERVER_URL}/assign-token.php?worker=${WORKER_ID}`, { agent });
-    const data = await workRes.json();
-
-    if (!data || !data.mint) {
-      console.log("⏳ Không có token nào pending...");
-      return;
-    }
-
     const rayPairs = await getRaydiumPairs();
     const scanTime = getLocalTime();
+    const tokens = await assignBatchTokens(BATCH_SIZE);
+    if (tokens.length === 0) return;
 
-    const price = await getTokenPrice(data.mint, rayPairs);
-    if (price) {
-      console.log(`✅ [${data.mint}] Giá: ${price.value} (${price.source})`);
+    const results = [];
+    const startTime = Date.now();
 
-      const payload = {
-        mint: data.mint,
-        currentPrice: price.value,
-        scanTime: scanTime
-      };
-
-      if (data.index !== undefined) {
-        payload.index = data.index; // 👈 gửi kèm index nếu có
+    for (let i = 0; i < tokens.length; i++) {
+      const token = tokens[i];
+      const price = await getTokenPriceWithTimeout(token.mint, rayPairs, 5000);
+      if (price) {
+        results.push({
+          mint: token.mint,
+          index: token.index ?? undefined,
+          currentPrice: price.value,
+          scanTime: scanTime
+        });
       }
 
-      await fetch(`${SERVER_URL}/update-token.php`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-        agent
-      });
-    } else {
-      console.log(`❌ Không lấy được giá cho ${data.mint}`);
+      const elapsed = Date.now() - startTime;
+      if (results.length > 0 && elapsed > 25000) {
+        await sendResults(results);
+        results.length = 0;
+      }
+
+      await delay(DELAY_MS);
     }
 
-    await delay(DELAY_MS);
-  } catch (err) {
-    console.error("❌ Scan error:", err.message);
-  }
+    if (results.length > 0) {
+      await sendResults(results);
+      results.length = 0;
+    }
+
+  } catch {}
 }
 
 app.get("/", (req, res) => {
@@ -105,14 +133,18 @@ app.get("/", (req, res) => {
 });
 
 app.listen(PORT, () => {
-  console.log(`✅ WebCon (worker=${WORKER_ID}) listening on port ${PORT}`);
-
+  loadRpcUrls();
   let round = 1;
   (async function loop() {
     while (true) {
-      console.log(`🔁 Round ${round++}`);
       await scanRound(round);
+      round++;
       await delay(ROUND_DELAY_MS);
     }
   })();
 });
+
+function loadRpcUrls() {
+  // dummy implementation to prevent crash if missing
+  return;
+}
