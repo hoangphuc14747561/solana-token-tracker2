@@ -13,7 +13,7 @@ const WSOL = "So11111111111111111111111111111111111111112";
 const DELAY_MS = 2400;
 const ROUND_DELAY_MS = 500;
 const BATCH_SIZE = 5;
-const AMOUNT = 100_000_000;
+const RAM_LIMIT_MB = 300;
 
 let apiKeys = [];
 
@@ -22,8 +22,7 @@ function loadRpcUrls() {
     const raw = fs.readFileSync("apikeys.txt", "utf-8");
     apiKeys = raw.trim().split("\n").filter(Boolean);
     if (apiKeys.length === 0) throw new Error("Không có API key nào trong file.");
-  } catch (e) {
-    console.error("❌ Lỗi khi đọc apikeys.txt:", e.message);
+  } catch {
     process.exit(1);
   }
 }
@@ -53,13 +52,14 @@ async function getTokenPriceFromHelius(mint) {
   try {
     const res1 = await callRpc("getTokenLargestAccounts", [mint]);
     const tokenAccounts = res1?.result?.value;
-    if (!tokenAccounts || tokenAccounts.length === 0) return null;
+    if (!tokenAccounts?.length) return null;
 
-    const tokenAccount = tokenAccounts[0].address;
-
+    const tokenAccount = tokenAccounts[0]?.address;
     const res2 = await callRpc("getAccountInfo", [tokenAccount, { encoding: "jsonParsed" }]);
-    const owner = res2?.result?.value?.data?.parsed?.info?.owner;
-    const tokenAmount = parseFloat(res2?.result?.value?.data?.parsed?.info?.tokenAmount?.uiAmount);
+    const info = res2?.result?.value?.data?.parsed?.info;
+    const owner = info?.owner;
+    const tokenAmount = parseFloat(info?.tokenAmount?.uiAmount || "0");
+
     if (!owner || tokenAmount === 0) return null;
 
     const res3 = await callRpc("getTokenAccountsByOwner", [
@@ -67,13 +67,13 @@ async function getTokenPriceFromHelius(mint) {
       { mint: WSOL },
       { encoding: "jsonParsed" }
     ]);
-    const wsolAccounts = res3?.result?.value;
-    if (!wsolAccounts || wsolAccounts.length === 0) return null;
 
-    const wsolAccount = wsolAccounts[0].pubkey;
+    const wsolAccount = res3?.result?.value?.[0]?.pubkey;
+    if (!wsolAccount) return null;
 
     const res4 = await callRpc("getTokenAccountBalance", [wsolAccount]);
-    const wsolAmount = parseFloat(res4?.result?.value?.uiAmount);
+    const wsolAmount = parseFloat(res4?.result?.value?.uiAmount || "0");
+
     if (!wsolAmount || tokenAmount === 0) return null;
 
     return { value: +(wsolAmount / tokenAmount).toFixed(9), source: "Helius" };
@@ -147,12 +147,23 @@ async function scanRound(round) {
   }
 }
 
+function monitorMemoryAndRestart() {
+  setInterval(() => {
+    const usedMB = process.memoryUsage().rss / 1024 / 1024;
+    if (usedMB > RAM_LIMIT_MB) {
+      process.exit(0); // Auto restart on Render
+    }
+  }, 60000); // Check every 60s
+}
+
 app.get("/", (req, res) => {
   res.send(`✅ WebCon [${WORKER_ID}] đang chạy`);
 });
 
 app.listen(PORT, () => {
   loadRpcUrls();
+  monitorMemoryAndRestart();
+
   let round = 1;
   (async function loop() {
     while (true) {
